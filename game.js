@@ -362,7 +362,7 @@ class AudioManager {
   // Lookahead scheduler – schedules notes slightly ahead of playback position
   _scheduleNotes() {
     const ctx       = this._getCtx();
-    const LOOKAHEAD = 0.1;   // seconds ahead to schedule
+    const LOOKAHEAD = 0.25;  // seconds ahead to schedule
     const INTERVAL  = 50;    // ms between scheduler runs
 
     while (this._nextNoteTime < ctx.currentTime + LOOKAHEAD) {
@@ -398,11 +398,16 @@ class AudioManager {
 
   startMusic() {
     if (this._isPlaying) return;
+    // Mark playing immediately to prevent concurrent startMusic calls
+    this._isPlaying = true;
     const ctx = this._getCtx();
-    if (ctx.state === 'suspended') ctx.resume();
-    this._isPlaying    = true;
-    this._nextNoteTime = ctx.currentTime + 0.05;
-    this._scheduleNotes();
+    // Always resume (no-op if already running); await via .then so
+    // _nextNoteTime is set against a live ctx.currentTime, not 0.
+    ctx.resume().then(() => {
+      if (!this._isPlaying) return; // was stopped while awaiting resume
+      this._nextNoteTime = ctx.currentTime + 0.05;
+      this._scheduleNotes();
+    });
   }
 
   pauseMusic() {
