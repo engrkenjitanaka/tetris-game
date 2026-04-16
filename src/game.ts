@@ -125,7 +125,8 @@ class Board {
         if (!shape[r][c]) continue;
         const nr = row + r;
         const nc = col + c;
-        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return false;
+        if (nr < 0) continue;                              // above the board is fine
+        if (nr >= ROWS || nc < 0 || nc >= COLS) return false;
         if (this.grid[nr][nc]) return false;
       }
     }
@@ -402,11 +403,15 @@ class Game {
   // ── Event binding ────────────────────────────────────────────────────
   private _bindEvents(): void {
     document.addEventListener('keydown', e => this._handleKey(e));
-    this.$btnStart.addEventListener('click', () => this._startOrRestart());
+    this.$btnStart.addEventListener('click', () => {
+      if (this.state === 'paused') this._unpause();
+      else this._startOrRestart();
+    });
   }
 
   private _handleKey(e: KeyboardEvent): void {
     if (e.key === 'Enter') {
+      if (this.state === 'paused') { this._unpause(); return; }
       if (this.state === 'idle' || this.state === 'gameover') this._startOrRestart();
       return;
     }
