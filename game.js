@@ -320,11 +320,11 @@ class AudioManager {
       this._ctx = new (window.AudioContext || window.webkitAudioContext)();
 
       this._masterGain = this._ctx.createGain();
-      this._masterGain.gain.value = this._muted ? 0 : 1;
+      this._masterGain.gain.value = 1;
       this._masterGain.connect(this._ctx.destination);
 
       this._musicGain = this._ctx.createGain();
-      this._musicGain.gain.value = this._musicVolume;
+      this._musicGain.gain.value = this._muted ? 0 : this._musicVolume;
       this._musicGain.connect(this._masterGain);
 
       this._sfxGain = this._ctx.createGain();
@@ -420,7 +420,7 @@ class AudioManager {
 
   setVolume(v) {
     this._musicVolume = v;
-    if (this._musicGain) {
+    if (this._musicGain && !this._muted) {
       this._musicGain.gain.setTargetAtTime(v, this._getCtx().currentTime, 0.02);
     }
     localStorage.setItem('tetris_music_vol', String(v));
@@ -428,8 +428,12 @@ class AudioManager {
 
   setMuted(on) {
     this._muted = on;
-    if (this._masterGain) {
-      this._masterGain.gain.setTargetAtTime(on ? 0 : 1, this._getCtx().currentTime, 0.02);
+    if (this._musicGain) {
+      this._musicGain.gain.setTargetAtTime(
+        on ? 0 : this._musicVolume,
+        this._getCtx().currentTime,
+        0.02
+      );
     }
     localStorage.setItem('tetris_muted', String(on));
   }
@@ -1046,7 +1050,7 @@ new BackgroundAnimator();
 
   function syncMuteBtn(muted) {
     btnMute.textContent = muted ? '\u266A' : '\u266B'; // ♪ muted : ♫ playing
-    btnMute.title       = muted ? 'Unmute music & SFX' : 'Mute music & SFX';
+    btnMute.title       = muted ? 'Unmute music' : 'Mute music';
     btnMute.classList.toggle('muted', muted);
   }
 
