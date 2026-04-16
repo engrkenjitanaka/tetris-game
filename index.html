@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tetris</title>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>TETRIS</h1>
+    </header>
+
+    <main>
+      <aside class="panel panel-left">
+        <div class="stat-block">
+          <div class="stat-label">SCORE</div>
+          <div class="stat-value" id="score">0</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-label">LEVEL</div>
+          <div class="stat-value" id="level">1</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-label">LINES</div>
+          <div class="stat-value" id="lines">0</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-label">HIGH SCORE</div>
+          <div class="stat-value" id="high-score">0</div>
+        </div>
+      </aside>
+
+      <div class="board-wrap">
+        <canvas id="board" width="300" height="600"></canvas>
+        <div id="overlay" class="overlay">
+          <div class="overlay-box">
+            <div id="overlay-title">TETRIS</div>
+            <div id="overlay-sub">Press <kbd>Enter</kbd> to start</div>
+            <button id="btn-start">START GAME</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel panel-right">
+        <div class="stat-block">
+          <div class="stat-label">NEXT</div>
+          <canvas id="next" width="120" height="120"></canvas>
+        </div>
+        <div class="stat-block controls-block">
+          <div class="stat-label">CONTROLS</div>
+          <div class="controls">
+            <div><kbd>←</kbd><kbd>→</kbd> Move</div>
+            <div><kbd>↑</kbd> Rotate</div>
+            <div><kbd>↓</kbd> Soft drop</div>
+            <div><kbd>Space</kbd> Hard drop</div>
+            <div><kbd>P</kbd> Pause</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
