@@ -33,23 +33,36 @@ body {
   overflow: hidden;
 }
 
+/* ─── Background canvas ─────────────────────────────────────────────── */
+#bg {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
 /* ─── Layout ────────────────────────────────────────────────────────── */
 #app {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 header h1 {
   font-size: 2.2rem;
   font-weight: 900;
   letter-spacing: 0.25em;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  background: linear-gradient(135deg, var(--accent), var(--accent2), var(--accent));
+  background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   text-shadow: none;
+  animation: title-shift 8s ease-in-out infinite;
 }
 
 main {
@@ -98,6 +111,7 @@ main {
   box-shadow:
     0 0 30px rgba(124,77,255,0.15),
     inset 0 0 40px rgba(0,0,0,0.5);
+  animation: board-glow 5s ease-in-out infinite;
 }
 
 #board {
@@ -236,6 +250,7 @@ html[data-theme="light"] {
 html[data-theme="light"] .board-wrap {
   background: #d8d8ec;
   box-shadow: 0 0 24px rgba(91,45,232,0.12);
+  animation-name: board-glow-light;
 }
 
 html[data-theme="light"] .overlay {
@@ -248,4 +263,33 @@ html[data-theme="light"] kbd {
 
 html[data-theme="light"] #overlay-sub kbd {
   background: #e4e4f4;
+}
+
+/* ─── Keyframe animations ───────────────────────────────────────────── */
+
+/* Board border glow – dark mode */
+@keyframes board-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 30px rgba(124,77,255,0.15),
+      inset 0 0 40px rgba(0,0,0,0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 52px rgba(124,77,255,0.30),
+      0 0 22px rgba(0,229,255,0.08),
+      inset 0 0 40px rgba(0,0,0,0.5);
+  }
+}
+
+/* Board border glow – light mode */
+@keyframes board-glow-light {
+  0%, 100% { box-shadow: 0 0 24px rgba(91,45,232,0.12); }
+  50%       { box-shadow: 0 0 40px rgba(91,45,232,0.24), 0 0 14px rgba(0,144,170,0.08); }
+}
+
+/* Title gradient shimmer */
+@keyframes title-shift {
+  0%, 100% { background-position: 0% center; }
+  50%       { background-position: 100% center; }
 }

@@ -562,8 +562,96 @@ class Game {
   }
 }
 
+// ── BackgroundAnimator ─────────────────────────────────────────────────
+// Draws slowly drifting ghost-tetromino outlines behind the game UI.
+class BackgroundAnimator {
+  constructor() {
+    this._canvas = document.getElementById('bg');
+    this._ctx    = this._canvas.getContext('2d');
+    this._particles = [];
+    this._resize();
+    const count = window.innerWidth < 680 ? 12 : 22;
+    for (let i = 0; i < count; i++) this._particles.push(this._spawn(true));
+    window.addEventListener('resize', () => this._resize());
+    this._tick();
+  }
+
+  _resize() {
+    this._canvas.width  = window.innerWidth;
+    this._canvas.height = window.innerHeight;
+  }
+
+  _spawn(scatter) {
+    const key   = PIECE_KEYS[Math.floor(Math.random() * PIECE_KEYS.length)];
+    const def   = TETROMINOES[key];
+    const shape = def.shapes[Math.floor(Math.random() * def.shapes.length)];
+    const sz    = Math.floor(Math.random() * 14) + 8; // 8–22 px per cell
+    return {
+      shape,
+      color : def.color,
+      sz,
+      x     : Math.random() * window.innerWidth,
+      y     : scatter
+              ? Math.random() * (window.innerHeight + 60) - 60
+              : window.innerHeight + 60,
+      vy    : Math.random() * 0.22 + 0.08,           // very slow upward drift
+      rot   : Math.random() * Math.PI * 2,
+      drot  : (Math.random() - 0.5) * 0.003,
+      alpha : Math.random() * 0.045 + 0.015,         // 0.015 – 0.06
+    };
+  }
+
+  _tick() {
+    const ctx = this._ctx;
+    const W   = this._canvas.width;
+    const H   = this._canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+
+    for (const p of this._particles) {
+      const cols = p.shape[0].length;
+      const rows = p.shape.length;
+      const cx   = p.x + (cols * p.sz) / 2;
+      const cy   = p.y + (rows * p.sz) / 2;
+
+      ctx.save();
+      ctx.globalAlpha  = p.alpha;
+      ctx.strokeStyle  = p.color;
+      ctx.lineWidth    = 1;
+      ctx.translate(cx, cy);
+      ctx.rotate(p.rot);
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (p.shape[r][c]) {
+            ctx.strokeRect(
+              c * p.sz - (cols * p.sz) / 2 + 0.5,
+              r * p.sz - (rows * p.sz) / 2 + 0.5,
+              p.sz - 1,
+              p.sz - 1,
+            );
+          }
+        }
+      }
+
+      ctx.restore();
+
+      p.y   -= p.vy;
+      p.rot += p.drot;
+
+      // Respawn at the bottom once fully off the top edge
+      if (p.y + p.shape.length * p.sz < -10) {
+        Object.assign(p, this._spawn(false));
+      }
+    }
+
+    requestAnimationFrame(() => this._tick());
+  }
+}
+
 // ── Bootstrap ──────────────────────────────────────────────────────────
 const game = new Game();
+new BackgroundAnimator();
 
 // ── Theme toggle ──────────────────────────────────────────────────────
 {
