@@ -691,7 +691,7 @@ class Game {
   private _bindEvents(): void {
     document.addEventListener('keydown', e => this._handleKey(e));
     this.$btnStart.addEventListener('click', () => {
-      this.audio.playClick();
+      try { this.audio.playClick(); } catch (_) {}
       if (this.state === 'paused') this._unpause();
       else this._startOrRestart();
     });
@@ -739,7 +739,7 @@ class Game {
 
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.rafId = requestAnimationFrame(ts => this._loop(ts));
-    this.audio.startMusic();
+    try { this.audio.startMusic(); } catch (_) {}
   }
 
   // ── Spawn ────────────────────────────────────────────────────────────
@@ -976,7 +976,7 @@ class Game {
     this.lastTick  = 0;
     this.dropAccum = 0;
     this.rafId = requestAnimationFrame(ts => this._loop(ts));
-    this.audio.startMusic();
+    try { this.audio.startMusic(); } catch (_) {}
   }
 
   // ── Game Over ────────────────────────────────────────────────────────
