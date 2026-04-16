@@ -203,6 +203,61 @@ kbd {
 #btn-start:hover { opacity: 0.9; transform: scale(1.03); }
 #btn-start:active { transform: scale(0.97); }
 
+/* ─── Header flex layout ────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ─── Theme toggle button ───────────────────────────────────────────── */
+.theme-toggle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 1.15rem;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+  padding: 0;
+  line-height: 1;
+}
+
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ─── Light theme ───────────────────────────────────────────────────── */
+html[data-theme="light"] {
+  --bg:      #f5f5fb;
+  --surface: #ffffff;
+  --border:  #d4d4e8;
+  --accent:  #5b2de8;
+  --accent2: #0090aa;
+  --text:    #0d0d1a;
+  --muted:   #6262a0;
+}
+
+html[data-theme="light"] .board-wrap {
+  background: #d8d8ec;
+  box-shadow: 0 0 24px rgba(91,45,232,0.12);
+}
+
+html[data-theme="light"] .overlay {
+  background: rgba(240, 240, 252, 0.93);
+}
+
+html[data-theme="light"] kbd {
+  border-color: var(--border);
+}
+
+html[data-theme="light"] #overlay-sub kbd {
+  background: #e4e4f4;
+}
+
 /* ─── Responsive layout ─────────────────────────────────────────────── */
 @media (max-width: 680px) {
   body {

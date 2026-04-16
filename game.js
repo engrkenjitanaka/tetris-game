@@ -564,3 +564,27 @@ class Game {
 
 // ── Bootstrap ──────────────────────────────────────────────────────────
 const game = new Game();
+
+// ── Theme toggle ──────────────────────────────────────────────────────
+{
+  const btnTheme = document.getElementById('btn-theme');
+
+  function syncThemeBtn() {
+    const light = document.documentElement.getAttribute('data-theme') === 'light';
+    btnTheme.textContent = light ? '\u263e' : '\u2600';
+    btnTheme.title = light ? 'Switch to dark mode' : 'Switch to light mode';
+  }
+
+  syncThemeBtn();
+  btnTheme.addEventListener('click', () => {
+    const light = document.documentElement.getAttribute('data-theme') === 'light';
+    if (light) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('tetris_theme', 'dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('tetris_theme', 'light');
+    }
+    syncThemeBtn();
+  });
+}
