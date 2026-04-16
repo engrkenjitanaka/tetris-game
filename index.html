@@ -12,7 +12,13 @@
   <div id="app">
     <header>
       <h1>TETRIS</h1>
-      <button id="btn-theme" class="theme-toggle" aria-label="Toggle light/dark mode" title="Switch to light mode">&#9728;</button>
+      <div class="header-controls">
+        <div class="audio-controls">
+          <button id="btn-mute" class="icon-btn" aria-label="Mute/unmute music and sound effects" title="Mute music &amp; SFX">&#9834;</button>
+          <input type="range" id="music-vol" class="volume-slider" min="0" max="100" step="1" value="40" aria-label="Music volume" title="Music volume">
+        </div>
+        <button id="btn-theme" class="theme-toggle" aria-label="Toggle light/dark mode" title="Switch to light mode">&#9728;</button>
+      </div>
     </header>
 
     <main>

@@ -118,14 +118,13 @@ class Board {
     this.grid = createMatrix(ROWS, COLS);
   }
 
-  /** Returns true if the piece position is valid (no overlap / out-of-bounds). */
   isValid(shape: Shape, row: number, col: number): boolean {
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
         if (!shape[r][c]) continue;
         const nr = row + r;
         const nc = col + c;
-        if (nr < 0) continue;                              // above the board is fine
+        if (nr < 0) continue;
         if (nr >= ROWS || nc < 0 || nc >= COLS) return false;
         if (this.grid[nr][nc]) return false;
       }
@@ -133,7 +132,6 @@ class Board {
     return true;
   }
 
-  /** Lock the active piece into the grid. Returns false if piece is above board (game over). */
   lock(shape: Shape, row: number, col: number, color: string): boolean {
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
@@ -146,7 +144,6 @@ class Board {
     return true;
   }
 
-  /** Clear completed lines; return count cleared. */
   clearLines(): number {
     let cleared = 0;
     for (let r = ROWS - 1; r >= 0; r--) {
@@ -333,8 +330,293 @@ class Renderer {
   }
 }
 
+// ── AudioManager ───────────────────────────────────────────────────────
+// All audio synthesized via Web Audio API – no external files needed.
+class AudioManager {
+  private _ctx:         AudioContext | null = null;
+  private _masterGain:  GainNode | null = null;
+  private _musicGain:   GainNode | null = null;
+  private _sfxGain:     GainNode | null = null;
+
+  private _musicVolume:  number;
+  private _muted:        boolean;
+
+  private _melody:       [number, number][];
+  private _melodyIdx:    number = 0;
+  private _nextNoteTime: number = 0;
+  private _schedTimer:   ReturnType<typeof setTimeout> | null = null;
+  private _isPlaying:    boolean = false;
+
+  constructor() {
+    this._musicVolume = parseFloat(localStorage.getItem('tetris_music_vol') ?? '0.4');
+    this._muted       = localStorage.getItem('tetris_muted') === 'true';
+    this._melody      = this._buildMelody();
+  }
+
+  // Lazy-init AudioContext on first user interaction
+  private _getCtx(): AudioContext {
+    if (!this._ctx) {
+      this._ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      this._masterGain = this._ctx.createGain();
+      this._masterGain.gain.value = this._muted ? 0 : 1;
+      this._masterGain.connect(this._ctx.destination);
+
+      this._musicGain = this._ctx.createGain();
+      this._musicGain.gain.value = this._musicVolume;
+      this._musicGain.connect(this._masterGain);
+
+      this._sfxGain = this._ctx.createGain();
+      this._sfxGain.gain.value = 0.5;
+      this._sfxGain.connect(this._masterGain);
+    }
+    return this._ctx;
+  }
+
+  // Tetris A theme (Korobeiniki) – encoded as [frequency_hz, duration_s]
+  private _buildMelody(): [number, number][] {
+    const BPM = 144;
+    const Q   = 60 / BPM;   // quarter ≈ 0.417 s
+    const E   = Q / 2;       // eighth
+    const H   = Q * 2;       // half
+    const DQ  = Q * 1.5;     // dotted quarter
+
+    const E5 = 659.25, B4 = 493.88, C5 = 523.25, D5 = 587.33,
+          A4 = 440.00, F5 = 698.46, G5 = 783.99, A5 = 880.00;
+
+    return [
+      // Part A – main theme
+      [E5, Q],  [B4, E],  [C5, E],  [D5, Q],  [C5, E],  [B4, E],
+      [A4, Q],  [A4, E],  [C5, E],  [E5, Q],  [D5, E],  [C5, E],
+      [B4, DQ], [C5, E],  [D5, Q],  [E5, Q],
+      [C5, Q],  [A4, Q],  [A4, H],
+      // Part B – bridge
+      [0,  E],  [D5, DQ], [F5, E],  [A5, Q],  [G5, E],  [F5, E],
+      [E5, DQ], [C5, E],  [E5, Q],  [D5, E],  [C5, E],
+      [B4, Q],  [B4, E],  [C5, E],  [D5, Q],  [E5, Q],
+      [C5, Q],  [A4, Q],  [A4, Q],  [0,  Q],
+    ];
+  }
+
+  // Lookahead scheduler – schedules notes slightly ahead of playback position
+  private _scheduleNotes(): void {
+    const ctx       = this._getCtx();
+    const LOOKAHEAD = 0.1;   // seconds ahead to schedule
+    const INTERVAL  = 50;    // ms between scheduler runs
+
+    while (this._nextNoteTime < ctx.currentTime + LOOKAHEAD) {
+      const [freq, dur] = this._melody[this._melodyIdx];
+
+      if (freq > 0) {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'square';
+        osc.frequency.value = freq;
+
+        // Attack / sustain / release envelope
+        gain.gain.setValueAtTime(0,    this._nextNoteTime);
+        gain.gain.linearRampToValueAtTime(0.25, this._nextNoteTime + 0.005);
+        gain.gain.setValueAtTime(0.25, this._nextNoteTime + dur * 0.8);
+        gain.gain.linearRampToValueAtTime(0,   this._nextNoteTime + dur * 0.95);
+
+        osc.connect(gain);
+        gain.connect(this._musicGain!);
+        osc.start(this._nextNoteTime);
+        osc.stop(this._nextNoteTime + dur);
+      }
+
+      this._nextNoteTime += dur;
+      this._melodyIdx = (this._melodyIdx + 1) % this._melody.length;
+    }
+
+    if (this._isPlaying) {
+      this._schedTimer = setTimeout(() => this._scheduleNotes(), INTERVAL);
+    }
+  }
+
+  startMusic(): void {
+    if (this._isPlaying) return;
+    const ctx = this._getCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    this._isPlaying    = true;
+    this._nextNoteTime = ctx.currentTime + 0.05;
+    this._scheduleNotes();
+  }
+
+  pauseMusic(): void {
+    this._isPlaying = false;
+    if (this._schedTimer !== null) {
+      clearTimeout(this._schedTimer);
+      this._schedTimer = null;
+    }
+  }
+
+  stopMusic(): void {
+    this.pauseMusic();
+    this._melodyIdx = 0; // reset to beginning for next game
+  }
+
+  setVolume(v: number): void {
+    this._musicVolume = v;
+    if (this._musicGain) {
+      this._musicGain.gain.setTargetAtTime(v, this._getCtx().currentTime, 0.02);
+    }
+    localStorage.setItem('tetris_music_vol', String(v));
+  }
+
+  setMuted(on: boolean): void {
+    this._muted = on;
+    if (this._masterGain) {
+      this._masterGain.gain.setTargetAtTime(on ? 0 : 1, this._getCtx().currentTime, 0.02);
+    }
+    localStorage.setItem('tetris_muted', String(on));
+  }
+
+  get musicVolume(): number { return this._musicVolume; }
+  get muted():      boolean { return this._muted; }
+
+  // ── Sound effects ────────────────────────────────────────────────────
+
+  playMove(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 220;
+    g.gain.setValueAtTime(0.06, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.05);
+  }
+
+  playRotate(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(330, now);
+    osc.frequency.exponentialRampToValueAtTime(440, now + 0.08);
+    g.gain.setValueAtTime(0.07, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.12);
+  }
+
+  playSoftDrop(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 180;
+    g.gain.setValueAtTime(0.04, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.05);
+  }
+
+  playHardDrop(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.exponentialRampToValueAtTime(100, now + 0.18);
+    g.gain.setValueAtTime(0.12, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.22);
+  }
+
+  playLock(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 160;
+    g.gain.setValueAtTime(0.1, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.12);
+  }
+
+  playLineClear(count: number): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    if (count >= 4) {
+      // Tetris! – ascending fanfare
+      ([523, 659, 784, 1047] as number[]).forEach((freq, i) => {
+        const t = now + i * 0.07;
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.14, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+        osc.connect(g); g.connect(this._sfxGain!);
+        osc.start(t); osc.stop(t + 0.2);
+      });
+    } else {
+      // 1–3 lines – ascending sweep
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(400 + count * 80, now);
+      osc.frequency.exponentialRampToValueAtTime(900, now + 0.22);
+      g.gain.setValueAtTime(0.12, now);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+      osc.connect(g); g.connect(this._sfxGain!);
+      osc.start(now); osc.stop(now + 0.28);
+    }
+  }
+
+  playLevelUp(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    ([523, 659, 784, 1047] as number[]).forEach((freq, i) => {
+      const t = now + i * 0.09;
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      osc.connect(g); g.connect(this._sfxGain!);
+      osc.start(t); osc.stop(t + 0.18);
+    });
+  }
+
+  playGameOver(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    ([523, 466, 415, 370, 330, 294, 262] as number[]).forEach((freq, i) => {
+      const t = now + i * 0.12;
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.1, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      osc.connect(g); g.connect(this._sfxGain!);
+      osc.start(t); osc.stop(t + 0.25);
+    });
+  }
+
+  playHold(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(330, now + 0.14);
+    g.gain.setValueAtTime(0.09, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.18);
+  }
+
+  playClick(): void {
+    const ctx = this._getCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 660;
+    g.gain.setValueAtTime(0.06, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+    osc.connect(g); g.connect(this._sfxGain!);
+    osc.start(now); osc.stop(now + 0.08);
+  }
+}
+
 // ── Game class ─────────────────────────────────────────────────────────
 class Game {
+  private audio: AudioManager;
   private board: Board;
   private renderer: Renderer;
 
@@ -362,7 +644,8 @@ class Game {
   private holdUsed: boolean;
   private ghost: GhostPiece | null;
 
-  constructor() {
+  constructor(audio: AudioManager) {
+    this.audio    = audio;
     this.board    = new Board();
     this.renderer = new Renderer(
       document.getElementById('board') as HTMLCanvasElement,
@@ -404,6 +687,7 @@ class Game {
   private _bindEvents(): void {
     document.addEventListener('keydown', e => this._handleKey(e));
     this.$btnStart.addEventListener('click', () => {
+      this.audio.playClick();
       if (this.state === 'paused') this._unpause();
       else this._startOrRestart();
     });
@@ -451,6 +735,7 @@ class Game {
 
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.rafId = requestAnimationFrame(ts => this._loop(ts));
+    this.audio.startMusic();
   }
 
   // ── Spawn ────────────────────────────────────────────────────────────
@@ -483,6 +768,7 @@ class Game {
       this.piece.col += dCol;
       this._updateGhost();
       this._render();
+      this.audio.playMove();
     }
   }
 
@@ -501,6 +787,7 @@ class Game {
         this.piece.col    = nc;
         this._updateGhost();
         this._render();
+        this.audio.playRotate();
         return;
       }
     }
@@ -540,6 +827,7 @@ class Game {
       this.score++;
       this._updateHUD();
       this.dropAccum = 0;
+      this.audio.playSoftDrop();
     } else {
       this._lock();
     }
@@ -555,6 +843,7 @@ class Game {
     }
     this.score += dropped * 2;
     this._updateHUD();
+    this.audio.playHardDrop();
     this._lock();
     this._render();
   }
@@ -563,13 +852,12 @@ class Game {
   private _holdPiece(): void {
     if (!this.piece || this.holdUsed) return;
     this.holdUsed = true;
+    this.audio.playHold();
     const currentKey = this.piece.key;
     if (this.holdKey === null) {
-      // First hold: store current piece, spawn the queued next piece
       this.holdKey = currentKey;
       this._spawnPiece();
     } else {
-      // Swap: bring held piece into play (reset rotation + spawn position)
       const swapKey = this.holdKey;
       this.holdKey  = currentKey;
       this.piece    = new Piece(swapKey);
@@ -613,13 +901,10 @@ class Game {
       const SWIPE = 30;
 
       if (ax < 12 && ay < 12 && dt < 250) {
-        // Short tap → rotate clockwise
         this._rotate(1);
       } else if (ax > ay && ax > SWIPE) {
-        // Horizontal swipe → move
         dx > 0 ? this._move(0, 1) : this._move(0, -1);
       } else if (ay > ax && ay > SWIPE) {
-        // Vertical swipe down → hard drop; up → hold
         dy > 0 ? this._hardDrop() : this._holdPiece();
       }
     }, { passive: false });
@@ -631,13 +916,18 @@ class Game {
     const ok = this.board.lock(this.piece.shape, this.piece.row, this.piece.col, this.piece.color);
     if (!ok) { this._gameOver(); return; }
 
+    this.audio.playLock();
+
     const cleared = this.board.clearLines();
     if (cleared) {
       this.score += LINE_SCORES[cleared] * this.level;
       this.lines += cleared;
-      this.level  = Math.floor(this.lines / LINES_PER_LEVEL) + 1;
+      const prevLevel = this.level;
+      this.level = Math.floor(this.lines / LINES_PER_LEVEL) + 1;
       this._updateHUD();
       this._flashLines();
+      this.audio.playLineClear(cleared);
+      if (this.level > prevLevel) this.audio.playLevelUp();
     }
     this.holdUsed = false;
     this._spawnPiece();
@@ -667,6 +957,7 @@ class Game {
     if (this.state !== 'playing') return;
     this.state = 'paused';
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    this.audio.pauseMusic();
     this.$title.textContent    = 'PAUSED';
     this.$sub.innerHTML        = 'Press <kbd>P</kbd> or <kbd>Enter</kbd> to resume';
     this.$btnStart.textContent = 'RESUME';
@@ -681,12 +972,15 @@ class Game {
     this.lastTick  = 0;
     this.dropAccum = 0;
     this.rafId = requestAnimationFrame(ts => this._loop(ts));
+    this.audio.startMusic();
   }
 
   // ── Game Over ────────────────────────────────────────────────────────
   private _gameOver(): void {
     this.state = 'gameover';
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    this.audio.stopMusic();
+    this.audio.playGameOver();
     this.$title.textContent    = 'GAME OVER';
     this.$sub.innerHTML        = `Score: <strong>${this.score}</strong> — Press <kbd>Enter</kbd> to retry`;
     this.$btnStart.textContent = 'PLAY AGAIN';
@@ -724,7 +1018,35 @@ class Game {
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────
-new Game();
+const audio = new AudioManager();
+new Game(audio);
+
+// ── Audio controls ────────────────────────────────────────────────────
+{
+  const btnMute   = document.getElementById('btn-mute')!;
+  const volSlider = document.getElementById('music-vol') as HTMLInputElement;
+
+  function syncMuteBtn(muted: boolean): void {
+    btnMute.textContent = muted ? '\u266A' : '\u266B'; // ♪ muted : ♫ playing
+    btnMute.title       = muted ? 'Unmute music & SFX' : 'Mute music & SFX';
+    btnMute.classList.toggle('muted', muted);
+  }
+
+  // Restore saved state
+  volSlider.value = String(Math.round(audio.musicVolume * 100));
+  syncMuteBtn(audio.muted);
+
+  btnMute.addEventListener('click', () => {
+    const nowMuted = !audio.muted;
+    audio.setMuted(nowMuted);
+    syncMuteBtn(nowMuted);
+    if (!nowMuted) audio.playClick();
+  });
+
+  volSlider.addEventListener('input', () => {
+    audio.setVolume(parseInt(volSlider.value, 10) / 100);
+  });
+}
 
 // ── Theme toggle ──────────────────────────────────────────────────────
 {
@@ -738,6 +1060,7 @@ new Game();
 
   syncThemeBtn();
   btnTheme.addEventListener('click', () => {
+    audio.playClick();
     const light = document.documentElement.getAttribute('data-theme') === 'light';
     if (light) {
       document.documentElement.removeAttribute('data-theme');
