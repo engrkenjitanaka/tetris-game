@@ -191,18 +191,24 @@ class Piece {
 class Renderer {
   private bCtx: CanvasRenderingContext2D;
   private nCtx: CanvasRenderingContext2D;
+  private hCtx: CanvasRenderingContext2D;
   private bW: number;
   private bH: number;
   private nW: number;
   private nH: number;
+  private hW: number;
+  private hH: number;
 
-  constructor(boardCanvas: HTMLCanvasElement, nextCanvas: HTMLCanvasElement) {
+  constructor(boardCanvas: HTMLCanvasElement, nextCanvas: HTMLCanvasElement, holdCanvas: HTMLCanvasElement) {
     this.bCtx = boardCanvas.getContext('2d')!;
     this.nCtx = nextCanvas.getContext('2d')!;
+    this.hCtx = holdCanvas.getContext('2d')!;
     this.bW   = boardCanvas.width;
     this.bH   = boardCanvas.height;
     this.nW   = nextCanvas.width;
     this.nH   = nextCanvas.height;
+    this.hW   = holdCanvas.width;
+    this.hH   = holdCanvas.height;
   }
 
   private _drawCell(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, color: string): void {
@@ -299,6 +305,31 @@ class Renderer {
       }
     }
   }
+
+  renderHold(holdKey: string | null, holdUsed: boolean): void {
+    const ctx = this.hCtx;
+    ctx.fillStyle = '#05050d';
+    ctx.fillRect(0, 0, this.hW, this.hH);
+
+    if (!holdKey) return;
+
+    const def   = TETROMINOES[holdKey];
+    const shape = def.shapes[0];
+    const rows  = shape.length;
+    const cols  = shape[0].length;
+    const ox    = Math.floor((this.hW / NEXT_BLOCK - cols) / 2) * NEXT_BLOCK;
+    const oy    = Math.floor((this.hH / NEXT_BLOCK - rows) / 2) * NEXT_BLOCK;
+
+    ctx.globalAlpha = holdUsed ? 0.35 : 1;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (shape[r][c]) {
+          this._drawCell(ctx, ox + c * NEXT_BLOCK, oy + r * NEXT_BLOCK, NEXT_BLOCK, def.color);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 // ── Game class ─────────────────────────────────────────────────────────
@@ -326,6 +357,8 @@ class Game {
   private lines: number;
   private piece: Piece | null;
   private nextKey: string | null;
+  private holdKey: string | null;
+  private holdUsed: boolean;
   private ghost: GhostPiece | null;
 
   constructor() {
@@ -333,6 +366,7 @@ class Game {
     this.renderer = new Renderer(
       document.getElementById('board') as HTMLCanvasElement,
       document.getElementById('next') as HTMLCanvasElement,
+      document.getElementById('hold') as HTMLCanvasElement,
     );
 
     this.$score     = document.getElementById('score')!;
@@ -352,14 +386,17 @@ class Game {
     this.lastTick  = 0;
     this.dropAccum = 0;
 
-    this.score   = 0;
-    this.level   = 1;
-    this.lines   = 0;
-    this.piece   = null;
-    this.nextKey = null;
-    this.ghost   = null;
+    this.score    = 0;
+    this.level    = 1;
+    this.lines    = 0;
+    this.piece    = null;
+    this.nextKey  = null;
+    this.holdKey  = null;
+    this.holdUsed = false;
+    this.ghost    = null;
 
     this._bindEvents();
+    this._bindTouchEvents();
   }
 
   // ── Event binding ────────────────────────────────────────────────────
@@ -384,6 +421,7 @@ class Game {
       case 'ArrowUp':    e.preventDefault(); this._rotate(1);    break;
       case 'z': case 'Z': this._rotate(-1); break;
       case ' ':          e.preventDefault(); this._hardDrop();   break;
+      case 'Shift':      e.preventDefault(); this._holdPiece(); break;
       case 'p': case 'P': this._pause(); break;
     }
   }
@@ -396,6 +434,8 @@ class Game {
     this.lines     = 0;
     this.dropAccum = 0;
     this.lastTick  = 0;
+    this.holdKey   = null;
+    this.holdUsed  = false;
 
     this._updateHUD();
     this.nextKey = randomKey();
@@ -413,6 +453,7 @@ class Game {
     this.piece   = new Piece(this.nextKey!);
     this.nextKey = randomKey();
     this.renderer.renderNext(this.nextKey);
+    this.renderer.renderHold(this.holdKey, this.holdUsed);
     this._updateGhost();
 
     if (!this.board.isValid(this.piece.shape, this.piece.row, this.piece.col)) {
@@ -513,6 +554,72 @@ class Game {
     this._render();
   }
 
+  // ── Hold piece ───────────────────────────────────────────────────────
+  private _holdPiece(): void {
+    if (!this.piece || this.holdUsed) return;
+    this.holdUsed = true;
+    const currentKey = this.piece.key;
+    if (this.holdKey === null) {
+      // First hold: store current piece, spawn the queued next piece
+      this.holdKey = currentKey;
+      this._spawnPiece();
+    } else {
+      // Swap: bring held piece into play (reset rotation + spawn position)
+      const swapKey = this.holdKey;
+      this.holdKey  = currentKey;
+      this.piece    = new Piece(swapKey);
+      this._updateGhost();
+      this.renderer.renderHold(this.holdKey, this.holdUsed);
+    }
+    this._render();
+  }
+
+  // ── Touch / swipe controls ───────────────────────────────────────────
+  private _bindTouchEvents(): void {
+    const canvas = document.getElementById('board') as HTMLCanvasElement;
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+
+    canvas.addEventListener('touchstart', (e: TouchEvent) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      startX    = t.clientX;
+      startY    = t.clientY;
+      startTime = Date.now();
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+      e.preventDefault();
+      if (this.state === 'idle' || this.state === 'gameover') {
+        this._startOrRestart();
+        return;
+      }
+      if (this.state === 'paused') {
+        this._unpause();
+        return;
+      }
+      const t  = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      const ax = Math.abs(dx);
+      const ay = Math.abs(dy);
+      const dt = Date.now() - startTime;
+      const SWIPE = 30;
+
+      if (ax < 12 && ay < 12 && dt < 250) {
+        // Short tap → rotate clockwise
+        this._rotate(1);
+      } else if (ax > ay && ax > SWIPE) {
+        // Horizontal swipe → move
+        dx > 0 ? this._move(0, 1) : this._move(0, -1);
+      } else if (ay > ax && ay > SWIPE) {
+        // Vertical swipe down → hard drop; up → hold
+        dy > 0 ? this._hardDrop() : this._holdPiece();
+      }
+    }, { passive: false });
+  }
+
   // ── Lock piece ───────────────────────────────────────────────────────
   private _lock(): void {
     if (!this.piece) return;
@@ -527,6 +634,7 @@ class Game {
       this._updateHUD();
       this._flashLines();
     }
+    this.holdUsed = false;
     this._spawnPiece();
   }
 

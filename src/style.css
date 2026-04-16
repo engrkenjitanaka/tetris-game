@@ -113,6 +113,15 @@ main {
   margin-top: 6px;
 }
 
+/* ─── Hold-piece canvas ─────────────────────────────────────────────── */
+#hold {
+  display: block;
+  background: #05050d;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
 /* ─── Controls list ─────────────────────────────────────────────────── */
 .controls-block { padding: 12px; }
 
@@ -193,3 +202,52 @@ kbd {
 
 #btn-start:hover { opacity: 0.9; transform: scale(1.03); }
 #btn-start:active { transform: scale(0.97); }
+
+/* ─── Responsive layout ─────────────────────────────────────────────── */
+@media (max-width: 680px) {
+  body {
+    overflow-y: auto;
+    overflow-x: hidden;
+    align-items: flex-start;
+    padding: 8px 8px 32px;
+  }
+
+  header h1 { font-size: 1.5rem; }
+
+  main {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Right panel (NEXT + controls) above board, left panel (HOLD + stats) below */
+  .panel-right { order: 0; }
+  .board-wrap  { order: 1; }
+  .panel-left  { order: 2; }
+
+  .panel {
+    width: 300px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .stat-block {
+    flex: 1;
+    min-width: 55px;
+    padding: 8px;
+  }
+
+  .stat-value { font-size: 1.1rem; }
+
+  /* Canvas preview blocks keep their natural size */
+  .stat-block:has(canvas) {
+    flex: 0 0 auto;
+  }
+
+  /* Controls span full width so keyboard hints are readable */
+  .controls-block {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+}
