@@ -104,7 +104,8 @@ main {
   display: block;
 }
 
-/* ─── Next-piece canvas ─────────────────────────────────────────────── */
+/* ─── Hold / Next-piece canvases ───────────────────────────────────── */
+#hold,
 #next {
   display: block;
   background: #05050d;
