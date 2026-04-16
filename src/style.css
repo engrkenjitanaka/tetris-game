@@ -246,6 +246,11 @@ html[data-theme="light"] .board-wrap {
   box-shadow: 0 0 24px rgba(91,45,232,0.12);
 }
 
+html[data-theme="light"] #next,
+html[data-theme="light"] #hold {
+  background: #d8d8ec;
+}
+
 html[data-theme="light"] .overlay {
   background: rgba(240, 240, 252, 0.93);
 }

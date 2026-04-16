@@ -209,6 +209,10 @@ class Renderer {
     this.hH   = holdCanvas.height;
   }
 
+  private _getBgColor(): string {
+    return document.documentElement.getAttribute('data-theme') === 'light' ? '#d8d8ec' : '#05050d';
+  }
+
   private _drawCell(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, color: string): void {
     const pad = 1;
     ctx.fillStyle = color;
@@ -243,7 +247,7 @@ class Renderer {
   renderBoard(board: Board, activePiece: Piece | null, ghostPiece: GhostPiece | null): void {
     const ctx = this.bCtx;
 
-    ctx.fillStyle = '#05050d';
+    ctx.fillStyle = this._getBgColor();
     ctx.fillRect(0, 0, this.bW, this.bH);
 
     this._drawGrid(ctx, this.bW, this.bH);
@@ -287,7 +291,7 @@ class Renderer {
     const def   = TETROMINOES[nextKey];
     const shape = def.shapes[0];
 
-    ctx.fillStyle = '#05050d';
+    ctx.fillStyle = this._getBgColor();
     ctx.fillRect(0, 0, this.nW, this.nH);
 
     const rows = shape.length;
@@ -306,7 +310,7 @@ class Renderer {
 
   renderHold(holdKey: string | null, holdUsed: boolean): void {
     const ctx = this.hCtx;
-    ctx.fillStyle = '#05050d';
+    ctx.fillStyle = this._getBgColor();
     ctx.fillRect(0, 0, this.hW, this.hH);
 
     if (!holdKey) return;
@@ -1051,6 +1055,12 @@ new Game(audio);
 // ── Theme toggle ──────────────────────────────────────────────────────
 {
   const btnTheme = document.getElementById('btn-theme')!;
+
+  // Restore saved theme on page load
+  const savedTheme = localStorage.getItem('tetris_theme');
+  if (savedTheme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
 
   function syncThemeBtn(): void {
     const light = document.documentElement.getAttribute('data-theme') === 'light';
