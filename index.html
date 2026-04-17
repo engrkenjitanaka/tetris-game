@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0a0a0f" />
   <title>Tetris</title>
   <script>if(localStorage.getItem('tetris_theme')==='light')document.documentElement.setAttribute('data-theme','light');</script>
-  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <canvas id="bg" aria-hidden="true"></canvas>
@@ -74,8 +76,18 @@
         </div>
       </aside>
     </main>
+
+    <div id="touch-pad" class="touch-pad" aria-hidden="true">
+      <button class="t-btn" id="t-hold" aria-label="Hold piece">HOLD</button>
+      <button class="t-btn" id="t-left" aria-label="Move left">&#9664;</button>
+      <button class="t-btn" id="t-rotate" aria-label="Rotate">&#10227;</button>
+      <button class="t-btn" id="t-right" aria-label="Move right">&#9654;</button>
+      <button class="t-btn" id="t-down" aria-label="Soft drop">&#9660;</button>
+      <button class="t-btn" id="t-drop" aria-label="Hard drop">DROP</button>
+      <button class="t-btn t-pause" id="t-pause" aria-label="Pause">&#10073;&#10073;</button>
+    </div>
   </div>
 
-  <script type="module" src="./game.js"></script>
+  <script type="module" src="./src/main.ts"></script>
 </body>
 </html>
