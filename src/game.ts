@@ -21,6 +21,9 @@ const SPEED_TABLE: readonly number[] = [800, 650, 500, 370, 250, 170, 120, 90, 7
 const LOCK_DELAY_MS = 500;
 const LOCK_MOVE_RESET_LIMIT = 15;
 
+// Length of the line-clear flash/particle phase before rows actually collapse.
+const LINE_CLEAR_DURATION_MS = 320;
+
 // ── Types ──────────────────────────────────────────────────────────────
 type Shape = readonly (readonly number[])[];
 
@@ -36,6 +39,27 @@ interface GhostPiece {
 }
 
 type GameState = 'idle' | 'playing' | 'paused' | 'gameover';
+
+interface LineClearAnim {
+  rows: number[];
+  elapsed: number;
+  duration: number;
+  cleared: number;
+  awardedScore: number;
+}
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  life: number;
+  maxLife: number;
+  rot: number;
+  vrot: number;
+}
 
 // ── Tetromino definitions (SRS shapes, each rotation state) ────────────
 const TETROMINOES: Readonly<Record<string, TetrominoDef>> = {
@@ -311,6 +335,35 @@ class Renderer {
           this._drawCell(ctx, ox + c * NEXT_BLOCK, oy + r * NEXT_BLOCK, NEXT_BLOCK, def.color);
         }
       }
+    }
+  }
+
+  // Drawn on top of the board after renderBoard. Handles the flashing-row
+  // overlay during a line clear and any active confetti particles.
+  renderEffects(clearAnim: LineClearAnim | null, particles: readonly Particle[]): void {
+    const ctx = this.bCtx;
+
+    if (clearAnim) {
+      const t = Math.min(1, clearAnim.elapsed / clearAnim.duration);
+      // Rapid pulse that fades as the clear progresses.
+      const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 5);
+      const alpha = (1 - t) * (0.55 + 0.35 * pulse);
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      for (const r of clearAnim.rows) {
+        ctx.fillRect(0, r * BLOCK, this.bW, BLOCK);
+      }
+    }
+
+    for (const p of particles) {
+      const a = Math.max(0, Math.min(1, p.life / p.maxLife));
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      const half = p.size / 2;
+      ctx.fillRect(-half, -half, p.size, p.size);
+      ctx.restore();
     }
   }
 
@@ -658,6 +711,11 @@ class Game {
   private lockTimer: number | null;
   private lockResets: number;
 
+  // Active line-clear animation (rows held visible while flashing). When set,
+  // piece logic is suspended until the animation finishes.
+  private clearAnim: LineClearAnim | null;
+  private particles: Particle[];
+
   constructor(audio: AudioManager) {
     this.audio    = audio;
     this.board    = new Board();
@@ -695,6 +753,9 @@ class Game {
 
     this.lockTimer  = null;
     this.lockResets = 0;
+
+    this.clearAnim = null;
+    this.particles = [];
 
     this._bindEvents();
     this._bindTouchEvents();
@@ -743,6 +804,8 @@ class Game {
     this.lastTick  = 0;
     this.holdKey   = null;
     this.holdUsed  = false;
+    this.clearAnim = null;
+    this.particles = [];
 
     this._updateHUD();
     this.nextKey = randomKey();
@@ -1011,26 +1074,137 @@ class Game {
 
     this.audio.playLock();
 
-    const cleared = this.board.clearLines();
-    if (cleared) {
-      this.score += LINE_SCORES[cleared] * this.level;
-      this.lines += cleared;
-      const prevLevel = this.level;
-      this.level = Math.floor(this.lines / LINES_PER_LEVEL) + 1;
-      this._updateHUD();
-      this._flashLines();
-      this.audio.playLineClear(cleared);
-      if (this.level > prevLevel) this.audio.playLevelUp();
+    const fullRows: number[] = [];
+    for (let r = 0; r < ROWS; r++) {
+      if (this.board.grid[r].every(cell => cell !== 0)) fullRows.push(r);
     }
-    this.holdUsed = false;
+
+    if (fullRows.length === 0) {
+      this.holdUsed = false;
+      this._spawnPiece();
+      return;
+    }
+
+    // Lines cleared — kick off the visual phase, defer the actual collapse.
+    const cleared      = fullRows.length;
+    const awardedScore = LINE_SCORES[cleared] * this.level;
+
+    this._spawnLineClearParticles(fullRows);
+    this._showClearPopup(cleared, awardedScore);
+    this._flashBoardGlow(cleared);
+    if (cleared >= 4) this._screenShake();
+
+    this.audio.playLineClear(cleared);
+
+    this.clearAnim = {
+      rows:    fullRows,
+      elapsed: 0,
+      duration: LINE_CLEAR_DURATION_MS,
+      cleared,
+      awardedScore,
+    };
+    // Hide the now-locked piece while rows flash; new piece spawns in _completeClear.
+    this.piece = null;
+    this.ghost = null;
+  }
+
+  // Called by the loop once the line-clear animation has run its course.
+  // Performs the actual row collapse, scoring, and next-piece spawn.
+  private _completeClear(): void {
+    if (!this.clearAnim) return;
+    const { cleared, awardedScore } = this.clearAnim;
+
+    this.board.clearLines();
+    this.score += awardedScore;
+    this.lines += cleared;
+    const prevLevel = this.level;
+    this.level = Math.floor(this.lines / LINES_PER_LEVEL) + 1;
+    this._updateHUD();
+    if (this.level > prevLevel) this.audio.playLevelUp();
+
+    this.clearAnim = null;
+    this.holdUsed  = false;
     this._spawnPiece();
   }
 
-  // ── Visual flash on line clear ───────────────────────────────────────
-  private _flashLines(): void {
-    const canvas = document.getElementById('board') as HTMLCanvasElement;
-    canvas.style.boxShadow = '0 0 30px 6px #00e5ff';
-    setTimeout(() => { canvas.style.boxShadow = ''; }, 200);
+  // ── Effects ──────────────────────────────────────────────────────────
+  private _spawnLineClearParticles(rows: readonly number[]): void {
+    const PER_CELL = 4;
+    for (const r of rows) {
+      for (let c = 0; c < COLS; c++) {
+        const cell  = this.board.grid[r][c];
+        const color = typeof cell === 'string' ? cell : '#ffffff';
+        const cx = (c + 0.5) * BLOCK;
+        const cy = (r + 0.5) * BLOCK;
+        for (let i = 0; i < PER_CELL; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 0.06 + Math.random() * 0.22; // px/ms
+          const life  = 600 + Math.random() * 250;
+          this.particles.push({
+            x: cx,
+            y: cy,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 0.08,    // bias upward
+            size: 4 + Math.random() * 5,
+            color,
+            life,
+            maxLife: life,
+            rot:  Math.random() * Math.PI * 2,
+            vrot: (Math.random() - 0.5) * 0.02,
+          });
+        }
+      }
+    }
+  }
+
+  private _updateParticles(dt: number): void {
+    if (this.particles.length === 0) return;
+    const GRAVITY = 0.0007; // px/ms²
+    for (const p of this.particles) {
+      p.x   += p.vx * dt;
+      p.y   += p.vy * dt;
+      p.vy  += GRAVITY * dt;
+      p.rot += p.vrot * dt;
+      p.life -= dt;
+    }
+    this.particles = this.particles.filter(p => p.life > 0);
+  }
+
+  private _showClearPopup(cleared: number, score: number): void {
+    const labels = ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS!'];
+    const wrap = document.querySelector('.board-wrap');
+    if (!wrap) return;
+    const el = document.createElement('div');
+    el.className = `clear-popup clear-popup-${cleared}`;
+    const label = document.createElement('div');
+    label.className = 'popup-label';
+    label.textContent = labels[cleared] ?? `${cleared} LINES`;
+    const sc = document.createElement('div');
+    sc.className = 'popup-score';
+    sc.textContent = `+${score}`;
+    el.appendChild(label);
+    el.appendChild(sc);
+    wrap.appendChild(el);
+    setTimeout(() => el.remove(), 1100);
+  }
+
+  private _flashBoardGlow(cleared: number): void {
+    const canvas = document.getElementById('board') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const color = cleared >= 4 ? '#ffd740' : '#00e5ff';
+    const blur  = cleared >= 4 ? 50 : 30;
+    canvas.style.boxShadow = `0 0 ${blur}px 8px ${color}`;
+    setTimeout(() => { canvas.style.boxShadow = ''; }, 260);
+  }
+
+  private _screenShake(): void {
+    const canvas = document.getElementById('board') as HTMLElement | null;
+    if (!canvas) return;
+    canvas.classList.remove('shake');
+    // Force reflow so the animation restarts when the class is re-added.
+    void canvas.offsetWidth;
+    canvas.classList.add('shake');
+    setTimeout(() => canvas.classList.remove('shake'), 460);
   }
 
   // ── HUD ──────────────────────────────────────────────────────────────
@@ -1083,6 +1257,7 @@ class Game {
   // ── Render ───────────────────────────────────────────────────────────
   private _render(): void {
     this.renderer.renderBoard(this.board, this.piece, this.ghost);
+    this.renderer.renderEffects(this.clearAnim, this.particles);
   }
 
   // ── Main loop ────────────────────────────────────────────────────────
@@ -1092,7 +1267,16 @@ class Game {
     const dt = ts - this.lastTick;
     this.lastTick = ts;
 
-    if (this.piece) {
+    this._updateParticles(dt);
+
+    if (this.clearAnim) {
+      this.clearAnim.elapsed += dt;
+      if (this.clearAnim.elapsed >= this.clearAnim.duration) {
+        this._completeClear();
+      }
+    }
+
+    if (!this.clearAnim && this.piece) {
       const grounded = !this.board.isValid(this.piece.shape, this.piece.row + 1, this.piece.col);
 
       if (grounded) {
