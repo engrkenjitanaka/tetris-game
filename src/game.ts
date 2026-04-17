@@ -769,11 +769,16 @@ class Game {
       try { this.audio.playClick(); } catch (_) {}
       if (this.state === 'paused') this._unpause();
       else this._startOrRestart();
+      // Drop focus so subsequent Enter/Space presses aren't re-routed here.
+      (this.$btnStart as HTMLButtonElement).blur();
     });
   }
 
   private _handleKey(e: KeyboardEvent): void {
     if (e.key === 'Enter') {
+      // Prevent focused overlay button from being activated as a synthetic
+      // click — otherwise pause→Enter would unpause AND then reset the game.
+      e.preventDefault();
       if (this.state === 'paused') { this._unpause(); return; }
       if (this.state === 'idle' || this.state === 'gameover') this._startOrRestart();
       return;
