@@ -15,6 +15,12 @@ const LINE_SCORES: readonly number[] = [0, 100, 300, 500, 800];
 // Drop-interval ms per level (index = level-1, capped at index 9)
 const SPEED_TABLE: readonly number[] = [800, 650, 500, 370, 250, 170, 120, 90, 70, 50];
 
+// Grace period (ms) after a piece lands before it locks — lets the player
+// slide/rotate it. Any successful move or rotation while grounded resets the
+// timer, but only up to LOCK_MOVE_RESET_LIMIT times to prevent infinite stall.
+const LOCK_DELAY_MS = 500;
+const LOCK_MOVE_RESET_LIMIT = 15;
+
 // ── Types ──────────────────────────────────────────────────────────────
 type Shape = readonly (readonly number[])[];
 
@@ -648,6 +654,10 @@ class Game {
   private holdUsed: boolean;
   private ghost: GhostPiece | null;
 
+  // null = piece not currently grounded; otherwise ms accumulated since landing
+  private lockTimer: number | null;
+  private lockResets: number;
+
   constructor(audio: AudioManager) {
     this.audio    = audio;
     this.board    = new Board();
@@ -682,6 +692,9 @@ class Game {
     this.holdKey  = null;
     this.holdUsed = false;
     this.ghost    = null;
+
+    this.lockTimer  = null;
+    this.lockResets = 0;
 
     this._bindEvents();
     this._bindTouchEvents();
@@ -744,8 +757,10 @@ class Game {
 
   // ── Spawn ────────────────────────────────────────────────────────────
   private _spawnPiece(): void {
-    this.piece   = new Piece(this.nextKey!);
-    this.nextKey = randomKey();
+    this.piece      = new Piece(this.nextKey!);
+    this.nextKey    = randomKey();
+    this.lockTimer  = null;
+    this.lockResets = 0;
     this.renderer.renderNext(this.nextKey);
     this.renderer.renderHold(this.holdKey, this.holdUsed);
     this._updateGhost();
@@ -763,6 +778,21 @@ class Game {
     this.ghost = { shape: this.piece.shape, row: r, col: this.piece.col };
   }
 
+  // Call after any successful player-driven move or rotation. If the piece
+  // slid off a ledge it cancels the lock delay; if it is still grounded it
+  // resets the timer (up to LOCK_MOVE_RESET_LIMIT times).
+  private _onPieceMoved(): void {
+    if (!this.piece) return;
+    const grounded = !this.board.isValid(this.piece.shape, this.piece.row + 1, this.piece.col);
+    if (!grounded) {
+      this.lockTimer  = null;
+      this.lockResets = 0;
+    } else if (this.lockTimer !== null && this.lockResets < LOCK_MOVE_RESET_LIMIT) {
+      this.lockTimer = 0;
+      this.lockResets++;
+    }
+  }
+
   // ── Movement ─────────────────────────────────────────────────────────
   private _move(dRow: number, dCol: number): void {
     if (!this.piece) return;
@@ -770,6 +800,7 @@ class Game {
     if (this.board.isValid(shape, row + dRow, col + dCol)) {
       this.piece.row += dRow;
       this.piece.col += dCol;
+      this._onPieceMoved();
       this._updateGhost();
       this._render();
       this.audio.playMove();
@@ -789,6 +820,7 @@ class Game {
         this.piece.rotIdx = (this.piece.rotIdx + dir + this.piece.def.shapes.length) % this.piece.def.shapes.length;
         this.piece.row    = nr;
         this.piece.col    = nc;
+        this._onPieceMoved();
         this._updateGhost();
         this._render();
         this.audio.playRotate();
@@ -831,10 +863,10 @@ class Game {
       this.score++;
       this._updateHUD();
       this.dropAccum = 0;
+      this._onPieceMoved();
       this.audio.playSoftDrop();
-    } else {
-      this._lock();
     }
+    // When already grounded, _loop's lock-delay timer handles the lock.
     this._render();
   }
 
@@ -862,9 +894,11 @@ class Game {
       this.holdKey = currentKey;
       this._spawnPiece();
     } else {
-      const swapKey = this.holdKey;
-      this.holdKey  = currentKey;
-      this.piece    = new Piece(swapKey);
+      const swapKey   = this.holdKey;
+      this.holdKey    = currentKey;
+      this.piece      = new Piece(swapKey);
+      this.lockTimer  = null;
+      this.lockResets = 0;
       this._updateGhost();
       this.renderer.renderHold(this.holdKey, this.holdUsed);
     }
@@ -1003,16 +1037,33 @@ class Game {
     const dt = ts - this.lastTick;
     this.lastTick = ts;
 
-    const interval = SPEED_TABLE[Math.min(this.level - 1, SPEED_TABLE.length - 1)];
-    this.dropAccum += dt;
+    if (this.piece) {
+      const grounded = !this.board.isValid(this.piece.shape, this.piece.row + 1, this.piece.col);
 
-    if (this.dropAccum >= interval) {
-      this.dropAccum -= interval;
-      if (this.piece && this.board.isValid(this.piece.shape, this.piece.row + 1, this.piece.col)) {
-        this.piece.row++;
-        this._updateGhost();
+      if (grounded) {
+        // Piece has landed — give the player a grace window to slide/rotate
+        // before locking, instead of snapping in on contact.
+        if (this.lockTimer === null) this.lockTimer = 0;
+        this.lockTimer += dt;
+        this.dropAccum = 0;
+
+        if (this.lockTimer >= LOCK_DELAY_MS) {
+          this._lock();
+        }
       } else {
-        this._lock();
+        this.lockTimer  = null;
+        this.lockResets = 0;
+
+        const interval = SPEED_TABLE[Math.min(this.level - 1, SPEED_TABLE.length - 1)];
+        this.dropAccum += dt;
+
+        if (this.dropAccum >= interval) {
+          this.dropAccum -= interval;
+          if (this.board.isValid(this.piece.shape, this.piece.row + 1, this.piece.col)) {
+            this.piece.row++;
+            this._updateGhost();
+          }
+        }
       }
     }
 
